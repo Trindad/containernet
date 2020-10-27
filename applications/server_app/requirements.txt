@@ -1,0 +1,4 @@
+requests==2.20.0
+pytest==3.8.0
+websockets==8.1
+asyncio==3.4.3
