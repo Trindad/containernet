@@ -12,4 +12,6 @@ COPY ./app /app
 
 WORKDIR /app
 
-CMD [ "python", "app.py" ]
+RUN mkdir /app/log
+
+CMD [ "python", "-u", "app.py" ]

@@ -1,12 +1,10 @@
 #!/usr/bin/python
-"""
-This is the most simple example to showcase Containernet.
-"""
 from mininet.net import Containernet
 from mininet.node import Controller
 from mininet.cli import CLI
 from mininet.link import TCLink
 from mininet.log import info, setLogLevel
+import time
 setLogLevel('info')
 
 net = Containernet(controller=Controller)
@@ -15,9 +13,13 @@ info('*** Adding controller\n')
 net.addController('c0')
 
 info('*** Adding docker containers\n')
-A = net.addDocker('A', ip='10.0.0.251', ports=[8766], port_bindings={8766:8766}, dimage="server_app")
-B = net.addDocker('B', ip='10.0.0.252', ports=[8766], port_bindings={8767:8766}, dimage="client_app")
-C = net.addDocker('C', ip='10.0.0.253', ports=[8766], port_bindings={8768:8766}, dimage="client_app")
+A = net.addDocker('A', ip='10.0.0.251', ports=[8766], dimage="server_app", volumes=["logsa:/app/log"])
+B = net.addDocker('B', ip='10.0.0.252', ports=[8766], dimage="client_app", volumes=["logsb:/app/log"])
+C = net.addDocker('C', ip='10.0.0.253', ports=[8766], dimage="client_app", volumes=["logsc:/app/log"])
+
+A.cmd("python", "-u", "app.py", "> ./log/logs", "&")
+B.cmd("python", "-u", "app.py", "> ./log/logs", "&")
+C.cmd("python", "-u", "app.py", "> ./log/logs", "&")
 
 info('*** Adding switches\n')
 s1 = net.addSwitch('s1')
