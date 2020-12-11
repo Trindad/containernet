@@ -125,8 +125,8 @@ async def calculate_step():
 
 async def controller():
     while True:
-        await asyncio.sleep(1)
         if PRIMARY_CLIENT == None or SECONDARY_CLIENT == None:
+            await asyncio.sleep(1)
             print("Not all clients are connected yet")
             continue
 
