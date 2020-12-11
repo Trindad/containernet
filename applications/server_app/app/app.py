@@ -2,47 +2,148 @@ import requests
 import re
 import json
 
+import jsonpickle
+
 import asyncio
 import websockets
 
-USERS = set()
+import time
+
+from threading import Thread, Lock
+
+from encryption import generate_keys, encrypt, decrypt, send
+
+import operations as op
+
+MAX_ITERS = 10
+SEED = 61
+LR = 1e-4  # Learning rate
+
+losses = []
+
+# Global variables
+PRIMARY_CLIENT = None
+SECONDARY_CLIENT = None
+CLIENTS = set()
 connected_users = set()
 
+# mutex sync variables
+RESPONSE = asyncio.Queue()
+
+
 async def register(websocket):
-    USERS.add(websocket)
-    print(USERS)
+    CLIENTS.add(websocket)
+    print(CLIENTS)
+
 
 async def unregister(websocket):
-    USERS.remove(websocket)
-    print(USERS)
+    CLIENTS.remove(websocket)
+    print(CLIENTS)
+
+
+async def sendParams(websocket, request):
+    print("request to send params received")
+    primary = request["value"]
+    global PRIMARY_CLIENT
+    global SECONDARY_CLIENT
+    if primary:
+        print("Primary client connected")
+        PRIMARY_CLIENT = websocket
+    else:
+        print("Secondary client connected")
+        SECONDARY_CLIENT = websocket
+
+    params = {"seed": SEED, "lr": LR}
+    response = {"op": "PARAMS", "value": params}
+    print(f"Sending params to client {response}")
+    await websocket.send(json.dumps(response))
+
 
 async def broadcast(message):
-    response = {"op":"BROADCAST", "value": message}
-    for w in USERS:
+    response = {"op": "BROADCAST", "value": message}
+    for w in CLIENTS:
         await w.send(json.dumps(response))
 
-async def hello(websocket, path):
+
+async def server(websocket, path):
+    print("New client")
     await register(websocket)
     while True:
         try:
             async for message in websocket:
-                data = json.loads(message)
-                print(f"< {data}")
-                if data["op"] == "IP":
-                    connected_users.add(data["value"])
-                    print(connected_users)
-                    response = {"op":"CONIP", "value": list(connected_users)}
-                    await websocket.send(json.dumps(response))
-                if data["op"] == "BROADCAST":
-                    await broadcast(data["value"])
+                request = json.loads(message)
+                print(f"Request received from client {request['op']}")
+                if request["op"] == op.SEND_PARAMS:
+                    await sendParams(websocket, request)
+                else:
+                    global RESPONSE
+                    await RESPONSE.put(request)
+
         finally:
+            print("Unregistering client")
             await unregister(websocket)
 
 
+async def calculate_step():
+    request = {"op": op.SECONDARY_STEP}
+    await SECONDARY_CLIENT.send(json.dumps(request))
+    print("secondary step request sent")
 
-print("Starting Server")
-start_server = websockets.serve(hello, "0.0.0.0", 8766)
+    print("Awaiting for step response")
+    response = await RESPONSE.get()
+    print("Step response received")
 
-asyncio.get_event_loop().run_until_complete(start_server)
-asyncio.get_event_loop().run_forever()
+    epoch_end = response['value']['epoch_end']
+    if not epoch_end:
+        u = response['value']['u']
+        L = response['value']['L']
+        value = {"u": u, "L": L}
+        request = {"op": op.PRIMARY_STEP, "value": value}
+        await PRIMARY_CLIENT.send(json.dumps(request))
+        print("Awaiting for step response")
+        response = await RESPONSE.get()
+        print("Awaiting for step response")
 
+        L_encrypted = response['value']['L']
+        gradient = response['value']['d']
+
+        L_encrypted = jsonpickle.decode(L_encrypted)
+
+        loss = decrypt(L_encrypted) / 128
+        print("***********")
+        print("LOSS:", loss)
+        print("***********")
+
+        request = {"op": op.BACKPROP, "value": gradient} 
+        await SECONDARY_CLIENT.send(json.dumps(request))
+        await PRIMARY_CLIENT.send(json.dumps(request))
+
+        response = await RESPONSE.get() # wait for both responses
+        response = await RESPONSE.get() 
+
+
+
+async def controller():
+    while True:
+        await asyncio.sleep(1)
+        if PRIMARY_CLIENT == None or SECONDARY_CLIENT == None:
+            print("Not all clients are connected yet")
+            continue
+
+        # EPOCH
+        await calculate_step()
+
+
+async def main():
+    start_server = websockets.serve(server, "0.0.0.0", 8766)
+
+    print("Starting Server")
+    await asyncio.wait([start_server, controller()], return_when=asyncio.ALL_COMPLETED)
+
+
+if __name__ == '__main__':
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(main())
+    finally:
+        loop.close()
