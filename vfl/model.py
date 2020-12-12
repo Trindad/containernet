@@ -19,4 +19,4 @@ class Model(nn.Module):
         ]))
 
     def forward(self, x):
-        return self.dense_layer(x)
+        return self.dense_layer(x) / 2 # divide by 2 so the final prediction sums 1

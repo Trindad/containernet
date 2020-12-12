@@ -34,7 +34,7 @@ class OneHot(object):
 
 
 
-def get_dataloader(side, seed=61):
+def get_dataloader(side, seed=61, train=True):
     if side.upper() == "A":
         transform = transforms.Compose([
             Crop(0, 0, 28, 14),
@@ -59,7 +59,7 @@ def get_dataloader(side, seed=61):
         root="../data/", 
         transform=transform, 
         target_transform=OneHot(10),
-        train=True, 
+        train=train, 
         download=True
     )
 
