@@ -110,6 +110,7 @@ async def calculate_step():
         L_encrypted = jsonpickle.decode(L_encrypted)
 
         loss = decrypt(L_encrypted) / 128
+        losses.append(loss)
         print("***********")
         print("LOSS:", loss)
         print("***********")
@@ -120,18 +121,36 @@ async def calculate_step():
 
         response = await RESPONSE.get() # wait for both responses
         response = await RESPONSE.get() 
+    return epoch_end
 
-
+async def init_epoch():
+    request = {"op": op.INIT_EPOCH}
+    await PRIMARY_CLIENT.send(json.dumps(request))
+    await SECONDARY_CLIENT.send(json.dumps(request))
+    await RESPONSE.get() # await for confirmations
+    await RESPONSE.get()
 
 async def controller():
-    while True:
+    epoch = 0
+    MAX_EPOCHS = 10
+    while epoch < MAX_EPOCHS:
         if PRIMARY_CLIENT == None or SECONDARY_CLIENT == None:
             await asyncio.sleep(1)
             print("Not all clients are connected yet")
             continue
 
         # EPOCH
-        await calculate_step()
+        print(f"EPOCH: {epoch} starting")
+        await init_epoch()
+        epoch_end = False
+        while not epoch_end:
+            epoch_end = await calculate_step()
+            print("step done")
+        print(f"EPOCH: {epoch} done")
+        print(f"EPOCH: loss {losses[-1]}")
+        print("*******************************")
+        epoch += 1
+
 
 
 async def main():

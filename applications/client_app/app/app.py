@@ -32,8 +32,9 @@ LR = 0
 
 print("Starting service")
 
+
 async def fetchParams(websocket):
-    messsage = {"op":op.SEND_PARAMS, "value": PRIMARY}
+    messsage = {"op": op.SEND_PARAMS, "value": PRIMARY}
     await websocket.send(json.dumps(messsage))
     response = await websocket.recv()
 
@@ -46,9 +47,10 @@ async def fetchParams(websocket):
     SEED = message["value"]["seed"]
     LR = message["value"]["lr"]
 
+
 async def step_secondary(model, dataloader_iter, websocket):
     print("starting secondary step")
-    message = {"op":op.SECONDARY_STEP}
+    message = {"op": op.SECONDARY_STEP}
 
     try:
         X, _ = next(dataloader_iter)
@@ -57,20 +59,19 @@ async def step_secondary(model, dataloader_iter, websocket):
         result = {"epoch_end": True}
         message["value"] = result
         await websocket.send(json.dumps(message))
-
+        return
         # send epoch finished to C
         # break
-    
+
     print("Calculating secondary step")
     u = model.forward(X)
     L = (u**2).sum()
-        
+
     u_encrypted = encrypt(u)
     L_encrypted = encrypt(L)
 
     u_serialized = jsonpickle.encode(u_encrypted)
     L_serialized = jsonpickle.encode(L_encrypted)
-
 
     result = {"u": u_serialized, "L": L_serialized, "epoch_end": False}
     message["value"] = result
@@ -81,6 +82,7 @@ async def step_secondary(model, dataloader_iter, websocket):
 
     return u
 
+
 async def step_primary(model,  u_secondary, L_secondary, dataloader_iter, websocket):
     print("primary step")
     X, Y = next(dataloader_iter)
@@ -90,12 +92,13 @@ async def step_primary(model,  u_secondary, L_secondary, dataloader_iter, websoc
     L_secondary = jsonpickle.decode(L_secondary)
 
     d_encrypted = u_secondary + encrypt(u - Y)
-    L_encrypted = L_secondary + encrypt(((u - Y)**2).sum()) + encrypt((u_secondary * (u - Y)).sum())
+    L_encrypted = L_secondary + \
+        encrypt(((u - Y)**2).sum()) + encrypt((u_secondary * (u - Y)).sum())
 
     d_serialized = jsonpickle.encode(d_encrypted)
     L_serialized = jsonpickle.encode(L_encrypted)
 
-    message = {"op":op.PRIMARY_STEP}
+    message = {"op": op.PRIMARY_STEP}
 
     result = {"d": d_serialized, "L": L_serialized, "epoch_end": False}
     message["value"] = result
@@ -106,18 +109,20 @@ async def step_primary(model,  u_secondary, L_secondary, dataloader_iter, websoc
 
     return u
 
+
 async def backprop(u, gradient, optimizer, websocket):
     gradient = jsonpickle.decode(gradient)
 
     optimizer.zero_grad()
     # https://discuss.pytorch.org/t/what-does-tensor-backward-do-mathematically/27953
-    u.backward(gradient=gradient) 
+    u.backward(gradient=gradient)
     optimizer.step()
 
-    message = {"op":op.BACKPROP}
+    message = {"op": op.BACKPROP}
     await websocket.send(json.dumps(message))
 
     return u
+
 
 async def loop(websocket):
     await fetchParams(websocket)
@@ -129,10 +134,14 @@ async def loop(websocket):
     u = None
 
     dataloader_iter = iter(dataloader)
-    while True: # epoch
+    while True:  # epoch
         async for message in websocket:
             request = json.loads(message)
             print("request received", request["op"])
+            if request["op"] == op.INIT_EPOCH:
+                dataloader_iter = iter(dataloader)  # reset the dataloader
+                message = {"op": op.INIT_EPOCH}
+                await websocket.send(json.dumps(message))
             if request["op"] == op.SECONDARY_STEP:
                 u = await step_secondary(model, dataloader_iter, websocket)
             elif request["op"] == op.PRIMARY_STEP:
@@ -144,11 +153,10 @@ async def loop(websocket):
 
 async def client():
     uri = "ws://"+websocket_ip+":8766"
-    
+
     while True:
         async with websockets.connect(uri) as websocket:
             await loop(websocket)
 
 
 asyncio.get_event_loop().run_until_complete(client())
-
