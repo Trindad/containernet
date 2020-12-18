@@ -8,10 +8,10 @@ from torch.utils.data import DataLoader
 
 class Crop(object):
    def __init__(self, top, left, height, width):
-        assert (isinstance(top, int) and isinstance(left, int) \
-                and isinstance(width, int) and isinstance(height, int), 
+        assert isinstance(top, int) and isinstance(left, int) \
+                and isinstance(width, int) and isinstance(height, int), \
                 "The params should be all integers"
-        )
+
         self.width = int(width)
         self.height = int(height)
         self.top = int(top)        

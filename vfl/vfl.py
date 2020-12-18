@@ -3,7 +3,7 @@ import torch
 
 from model import Model
 from data import get_dataloader
-from encryption import generate_keys, encrypt, decrypt, send
+from encryption import HomomorphicEncryption, generate_keys, encrypt, decrypt, send
 
 
 start = time()
@@ -17,8 +17,8 @@ A, B, C = 'A', 'B', 'C'
 ### C
 MAX_ITERS = 20
 SEED = 61
+encrypterC = HomomorphicEncryption()
 
-# public_key, private_key = generate_keys()
 losses_train = []
 losses_val = []
 # send_key(public_key, SEED)
@@ -30,6 +30,7 @@ modelA = Model()
 dataloaderA = get_dataloader(A, SEED)
 dataloader_valA = get_dataloader(A, SEED, train=False)
 optimizerA = torch.optim.Adam(modelA.parameters(), lr=LR)
+encrypterA = HomomorphicEncryption(client=True)
 
 ### B
 # SEED, key = receive()
@@ -37,6 +38,7 @@ modelB = Model()
 dataloaderB = get_dataloader(B, SEED)
 dataloader_valB = get_dataloader(B, SEED, train=False)
 optimizerB = torch.optim.Adam(modelB.parameters(), lr=LR)
+encrypterB = HomomorphicEncryption(client=True)
 
 print(f"Initialization took {time() - start:.1f}s")
 
@@ -51,6 +53,7 @@ for i in range(MAX_ITERS):
     modelB.train() 
 
     while True:
+        print('.', end='', flush=True)
         # Step 2
 
         ### A
@@ -64,8 +67,8 @@ for i in range(MAX_ITERS):
         uA = modelA.forward(xA)
         LA = (uA**2).sum()
         
-        uA_encrypted = encrypt(uA)
-        LA_encrypted = encrypt(LA)
+        uA_encrypted = encrypterA.encrypt_tensor(uA)
+        LA_encrypted = encrypterA.encrypt_tensor(LA)
         send(B, uA_encrypted, LA_encrypted)
 
         ### B
@@ -73,31 +76,21 @@ for i in range(MAX_ITERS):
         xB, y = next(dataloaderB_iter)
         uB = modelB.forward(xB)
 
-        d_encrypted = uA_encrypted + encrypt(uB - y)
-        L_encrypted = LA_encrypted + encrypt(((uB - y)**2).sum()) + encrypt((uA * (uB - y)).sum())
+        d_encrypted = uA_encrypted + encrypterB.encrypt_tensor(uB - y)
+        L_encrypted = LA_encrypted + encrypterB.encrypt_tensor(((uB - y)**2).sum()) + (((uA_encrypted * (uB - y).detach().cpu().numpy()).sum()) * 2)
         send(C, L_encrypted)
         send(A, d_encrypted)
 
 
         # Step 3
-
-        ### A
-        gradientA_encrypted = d_encrypted * uA
-        send(C, gradientA_encrypted)
-
-        ### B
-        gradientB_encrypted = d_encrypted * uB
-        send(C, gradientB_encrypted)
-
         ### C
-        loss = decrypt(L_encrypted) / SIZE_BATCH
+        loss = encrypterC.decrypt_tensor(L_encrypted) / SIZE_BATCH
         losses_train.append(loss)
         # TODO check if may stop by losses
 
-        gradientA = decrypt(gradientA_encrypted)
-        gradientB = decrypt(gradientB_encrypted)
-        send(A, gradientA)
-        send(B, gradientB)
+        gradient = encrypterC.decrypt_tensor(d_encrypted)
+        send(A, gradient)
+        send(B, gradient)
 
 
         # Step 4
@@ -105,14 +98,15 @@ for i in range(MAX_ITERS):
         ### A
         optimizerA.zero_grad()
         # https://discuss.pytorch.org/t/what-does-tensor-backward-do-mathematically/27953
-        uA.backward(gradient=gradientA)
+        uA.backward(gradient=gradient)
         optimizerA.step()
 
         ### B
         optimizerB.zero_grad()
-        uB.backward(gradient=gradientB)
+        uB.backward(gradient=gradient)
         optimizerB.step()
 
+    print()
     # Validation
 
     ## B
@@ -126,13 +120,22 @@ for i in range(MAX_ITERS):
             ## A
             uA = modelA.forward(xA)
             LA = (uA**2).sum()
+            uA_encrypted = encrypt(uA)
             LA_encrypted = encrypt(LA)
-            # send LA_encrypted to B
+            # send LA_encrypted, uA_encrypted to B
 
             ## B
             uB = modelB.forward(xB)
-            acc = ((uA + uB).argmax(axis=1) == y.argmax(axis=1))
-            L_encrypted = LA_encrypted + encrypt(((uB - y)**2).sum()) + (uA * (uB - y)).sum()
+            u_encrypted = uA_encrypted + encrypt(uB)
+            L_encrypted = LA_encrypted + encrypt(((uB - y)**2).sum()) + ((uA_encrypted * (uB - y)).sum() * 2)
+
+            ## C
+            u = u_encrypted.argmax(axis=1)
+            
+            ## B
+            acc = u == y.argmax(axis=1)
+
+            
             L_total += L_encrypted
             acc_total += acc.sum()
 
