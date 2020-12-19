@@ -13,7 +13,7 @@ import websockets
 import operations as op
 from data import get_dataloader
 from model import Model
-from encryption import generate_keys, encrypt, decrypt, send
+from encryption import HomomorphicEncryption
 
 if len(sys.argv) != 3:
     print(f"invalid arguments {sys.argv}, usage: [indentifier] [primary]")
@@ -25,10 +25,12 @@ PRIMARY = sys.argv[2] == "true"
 # websocket_ip = '10.0.0.251'
 websocket_ip = 'localhost'
 dataloader = None
-identifier = ""
+
+encryptor = None
 
 SEED = 0
 LR = 0
+BATCH_SIZE = 0
 
 print("Starting service")
 
@@ -40,13 +42,22 @@ async def fetchParams(websocket):
 
     message = json.loads(response)
 
-    print(f"Params received: {message}")
+    print(f"Params received")
 
     global SEED
     global LR
+    global BATCH_SIZE
     SEED = message["value"]["seed"]
     LR = message["value"]["lr"]
+    BATCH_SIZE = message["value"]["batch_size"]
 
+    pub = jsonpickle.decode(message["value"]["pub"])
+    path = INDENTIFIER + ".key"
+    file = open(INDENTIFIER + ".key", "wb")
+    with file:
+        file.write(pub)
+    global encryptor
+    encryptor = HomomorphicEncryption(path)
 
 async def step_secondary(model, dataloader_iter, websocket):
     print("starting secondary step")
@@ -67,8 +78,8 @@ async def step_secondary(model, dataloader_iter, websocket):
     u = model.forward(X)
     L = (u**2).sum()
 
-    u_encrypted = encrypt(u)
-    L_encrypted = encrypt(L)
+    u_encrypted = encryptor.encrypt_tensor(u)
+    L_encrypted = encryptor.encrypt_tensor(L)
 
     u_serialized = jsonpickle.encode(u_encrypted)
     L_serialized = jsonpickle.encode(L_encrypted)
@@ -91,9 +102,8 @@ async def step_primary(model,  u_secondary, L_secondary, dataloader_iter, websoc
     u_secondary = jsonpickle.decode(u_secondary)
     L_secondary = jsonpickle.decode(L_secondary)
 
-    d_encrypted = u_secondary + encrypt(u - Y)
-    L_encrypted = L_secondary + \
-        encrypt(((u - Y)**2).sum()) + encrypt((u_secondary * (u - Y)).sum())
+    d_encrypted = u_secondary + encryptor.encrypt_tensor(u - Y)
+    L_encrypted = L_secondary + encryptor.encrypt_tensor(((u - Y)**2).sum()) + (((u_secondary * (u - Y).detach().cpu().numpy()).sum()) * 2)
 
     d_serialized = jsonpickle.encode(d_encrypted)
     L_serialized = jsonpickle.encode(L_encrypted)

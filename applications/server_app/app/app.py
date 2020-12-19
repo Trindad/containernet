@@ -11,13 +11,22 @@ import time
 
 from threading import Thread, Lock
 
-from encryption import generate_keys, encrypt, decrypt, send
+from encryption import HomomorphicEncryption
 
 import operations as op
 
-MAX_ITERS = 10
+import logging
+
+logger = logging.getLogger('websockets')
+logger.setLevel(logging.DEBUG)
+logger.addHandler(logging.StreamHandler())
+
+MAX_ITERS = 100
 SEED = 61
 LR = 1e-4  # Learning rate
+BATCH_SIZE = 128
+
+encrypter = HomomorphicEncryption()
 
 losses = []
 
@@ -53,9 +62,9 @@ async def sendParams(websocket, request):
         print("Secondary client connected")
         SECONDARY_CLIENT = websocket
 
-    params = {"seed": SEED, "lr": LR}
+    params = {"seed": SEED, "lr": LR, "batch_size": BATCH_SIZE, "pub": jsonpickle.encode(encrypter.export_public_key_contents())}
     response = {"op": "PARAMS", "value": params}
-    print(f"Sending params to client {response}")
+    print("Sending params to client")
     await websocket.send(json.dumps(response))
 
 
@@ -109,7 +118,7 @@ async def calculate_step():
 
         L_encrypted = jsonpickle.decode(L_encrypted)
 
-        loss = decrypt(L_encrypted) / 128
+        loss = encrypter.decrypt_tensor(L_encrypted) / BATCH_SIZE
         losses.append(loss)
         print("***********")
         print("LOSS:", loss)
@@ -154,7 +163,7 @@ async def controller():
 
 
 async def main():
-    start_server = websockets.serve(server, "0.0.0.0", 8766)
+    start_server = websockets.serve(server, "0.0.0.0", 8766, ping_interval=None)
 
     print("Starting Server")
     await asyncio.wait([start_server, controller()], return_when=asyncio.ALL_COMPLETED)
