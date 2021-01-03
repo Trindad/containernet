@@ -15,12 +15,6 @@ from encryption import HomomorphicEncryption
 
 import operations as op
 
-import logging
-
-logger = logging.getLogger('websockets')
-logger.setLevel(logging.DEBUG)
-logger.addHandler(logging.StreamHandler())
-
 MAX_ITERS = 100
 SEED = 61
 LR = 1e-4  # Learning rate
@@ -62,7 +56,8 @@ async def sendParams(websocket, request):
         print("Secondary client connected")
         SECONDARY_CLIENT = websocket
 
-    params = {"seed": SEED, "lr": LR, "batch_size": BATCH_SIZE, "pub": jsonpickle.encode(encrypter.export_public_key_contents())}
+    params = {"seed": SEED, "lr": LR, "batch_size": BATCH_SIZE, "pub": jsonpickle.encode(
+        encrypter.export_public_key_contents()), "ctx": jsonpickle.encode(encrypter.export_context_contents())}
     response = {"op": "PARAMS", "value": params}
     print("Sending params to client")
     await websocket.send(json.dumps(response))
@@ -114,9 +109,12 @@ async def calculate_step():
         print("Awaiting for step response")
 
         L_encrypted = response['value']['L']
-        gradient = response['value']['d']
+        gradient_encrypted = response['value']['d']
 
-        L_encrypted = jsonpickle.decode(L_encrypted)
+        L_encrypted = encrypter.decode(jsonpickle.decode(L_encrypted))
+        gradient_encrypted = encrypter.decode(jsonpickle.decode(gradient_encrypted))
+
+        gradient = encrypter.decrypt_tensor(gradient_encrypted)
 
         loss = encrypter.decrypt_tensor(L_encrypted) / BATCH_SIZE
         losses.append(loss)
@@ -124,20 +122,22 @@ async def calculate_step():
         print("LOSS:", loss)
         print("***********")
 
-        request = {"op": op.BACKPROP, "value": gradient} 
+        request = {"op": op.BACKPROP, "value": jsonpickle.encode(gradient)}
         await SECONDARY_CLIENT.send(json.dumps(request))
         await PRIMARY_CLIENT.send(json.dumps(request))
 
-        response = await RESPONSE.get() # wait for both responses
-        response = await RESPONSE.get() 
+        response = await RESPONSE.get()  # wait for both responses
+        response = await RESPONSE.get()
     return epoch_end
+
 
 async def init_epoch():
     request = {"op": op.INIT_EPOCH}
     await PRIMARY_CLIENT.send(json.dumps(request))
     await SECONDARY_CLIENT.send(json.dumps(request))
-    await RESPONSE.get() # await for confirmations
+    await RESPONSE.get()  # await for confirmations
     await RESPONSE.get()
+
 
 async def controller():
     epoch = 0
@@ -161,9 +161,9 @@ async def controller():
         epoch += 1
 
 
-
 async def main():
-    start_server = websockets.serve(server, "0.0.0.0", 8766, ping_interval=None)
+    start_server = websockets.serve(
+        server, "0.0.0.0", 8766, ping_interval=None, max_size=2 ** 40)
 
     print("Starting Server")
     await asyncio.wait([start_server, controller()], return_when=asyncio.ALL_COMPLETED)

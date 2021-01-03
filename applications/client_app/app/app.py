@@ -14,10 +14,14 @@ import operations as op
 from data import get_dataloader
 from model import Model
 from encryption import HomomorphicEncryption
+import tempfile
 
 if len(sys.argv) != 3:
     print(f"invalid arguments {sys.argv}, usage: [indentifier] [primary]")
     quit()
+
+TEMP_DIR = tempfile.TemporaryDirectory()
+TEMP_DIR_PATH = TEMP_DIR.name
 
 INDENTIFIER = sys.argv[1]
 PRIMARY = sys.argv[2] == "true"
@@ -52,12 +56,18 @@ async def fetchParams(websocket):
     BATCH_SIZE = message["value"]["batch_size"]
 
     pub = jsonpickle.decode(message["value"]["pub"])
-    path = INDENTIFIER + ".key"
-    file = open(INDENTIFIER + ".key", "wb")
-    with file:
-        file.write(pub)
+    ctx = jsonpickle.decode(message["value"]["ctx"])
+
+    pubkeyfile = open(TEMP_DIR_PATH + INDENTIFIER + ".key", "wb")
+    with pubkeyfile:
+        pubkeyfile.write(pub)
+
+    ctxfile = open(TEMP_DIR_PATH + INDENTIFIER + ".con", "wb")
+    with ctxfile:
+        ctxfile.write(ctx)
+        
     global encryptor
-    encryptor = HomomorphicEncryption(path)
+    encryptor = HomomorphicEncryption(pubkeyfile.name, ctxfile.name)
 
 async def step_secondary(model, dataloader_iter, websocket):
     print("starting secondary step")
@@ -81,8 +91,8 @@ async def step_secondary(model, dataloader_iter, websocket):
     u_encrypted = encryptor.encrypt_tensor(u)
     L_encrypted = encryptor.encrypt_tensor(L)
 
-    u_serialized = jsonpickle.encode(u_encrypted)
-    L_serialized = jsonpickle.encode(L_encrypted)
+    u_serialized = jsonpickle.encode(encryptor.encode(u_encrypted))
+    L_serialized = jsonpickle.encode(encryptor.encode(L_encrypted))
 
     result = {"u": u_serialized, "L": L_serialized, "epoch_end": False}
     message["value"] = result
@@ -99,14 +109,14 @@ async def step_primary(model,  u_secondary, L_secondary, dataloader_iter, websoc
     X, Y = next(dataloader_iter)
     u = model.forward(X)
 
-    u_secondary = jsonpickle.decode(u_secondary)
-    L_secondary = jsonpickle.decode(L_secondary)
+    u_secondary = encryptor.decode(jsonpickle.decode(u_secondary))
+    L_secondary = encryptor.decode(jsonpickle.decode(L_secondary))
 
     d_encrypted = u_secondary + encryptor.encrypt_tensor(u - Y)
     L_encrypted = L_secondary + encryptor.encrypt_tensor(((u - Y)**2).sum()) + (((u_secondary * (u - Y).detach().cpu().numpy()).sum()) * 2)
 
-    d_serialized = jsonpickle.encode(d_encrypted)
-    L_serialized = jsonpickle.encode(L_encrypted)
+    d_serialized = jsonpickle.encode(encryptor.encode(d_encrypted))
+    L_serialized = jsonpickle.encode(encryptor.encode(L_encrypted))
 
     message = {"op": op.PRIMARY_STEP}
 
@@ -165,7 +175,7 @@ async def client():
     uri = "ws://"+websocket_ip+":8766"
 
     while True:
-        async with websockets.connect(uri) as websocket:
+        async with websockets.connect(uri, max_size=2 ** 40) as websocket:
             await loop(websocket)
 
 

@@ -17,8 +17,8 @@ A = net.addDocker('A', ip='10.0.0.251', ports=[8766], dimage="server_app", volum
 B = net.addDocker('B', ip='10.0.0.252', ports=[8766], dimage="client_app", volumes=["logsb:/app/log"])
 C = net.addDocker('C', ip='10.0.0.253', ports=[8766], dimage="client_app", volumes=["logsc:/app/log"])
 
-A.cmd("python", "-u", "app.py", "> ./log/logs", "&")
-B.cmd("python", "-u", "app.py", "> ./log/logs", "&")
+A.cmd("python", "-u", "app.py A false", "> ./log/logs", "&")
+B.cmd("python", "-u", "app.py B true", "> ./log/logs", "&")
 C.cmd("python", "-u", "app.py", "> ./log/logs", "&")
 
 info('*** Adding switches\n')

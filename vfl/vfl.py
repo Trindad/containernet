@@ -4,6 +4,7 @@ import torch
 from model import Model
 from data import get_dataloader
 from encryption import HomomorphicEncryption, generate_keys, encrypt, decrypt, send
+import jsonpickle
 
 
 start = time()
@@ -73,6 +74,12 @@ for i in range(MAX_ITERS):
 
         ### B
     # for xB, y in dataloaderB:
+        print("encoding")
+        uA_encrypted = jsonpickle.encode(uA_encrypted)
+        print("decoding")
+        uA_encrypted = jsonpickle.decode(uA_encrypted)
+
+        print("B")
         xB, y = next(dataloaderB_iter)
         uB = modelB.forward(xB)
 
