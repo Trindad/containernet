@@ -1,5 +1,6 @@
 from time import time
 import torch
+torch.set_deterministic(True)
 
 from model import Model
 from data import get_dataloader
@@ -27,6 +28,7 @@ losses_val = []
 
 ### A
 # SEED, key = receive()
+torch.manual_seed(SEED)
 modelA = Model()
 dataloaderA = get_dataloader(A, SEED)
 dataloader_valA = get_dataloader(A, SEED, train=False)
@@ -35,6 +37,7 @@ encrypterA = HomomorphicEncryption(client=True)
 
 ### B
 # SEED, key = receive()
+torch.manual_seed(SEED)
 modelB = Model()
 dataloaderB = get_dataloader(B, SEED)
 dataloader_valB = get_dataloader(B, SEED, train=False)
@@ -68,34 +71,40 @@ for i in range(MAX_ITERS):
         uA = modelA.forward(xA)
         LA = (uA**2).sum()
         
-        uA_encrypted = encrypterA.encrypt_tensor(uA)
-        LA_encrypted = encrypterA.encrypt_tensor(LA)
+        uA_encrypted = encrypterA.encode(encrypterA.encrypt_tensor(uA))
+        LA_encrypted = encrypterA.encode(encrypterA.encrypt_tensor(LA))
         send(B, uA_encrypted, LA_encrypted)
 
         ### B
     # for xB, y in dataloaderB:
-        print("encoding")
-        uA_encrypted = jsonpickle.encode(uA_encrypted)
-        print("decoding")
-        uA_encrypted = jsonpickle.decode(uA_encrypted)
-
         print("B")
         xB, y = next(dataloaderB_iter)
         uB = modelB.forward(xB)
 
+        uA_encrypted = encrypterA.decode(uA_encrypted)
+        LA_encrypted  = encrypterA.decode(LA_encrypted)
+
         d_encrypted = uA_encrypted + encrypterB.encrypt_tensor(uB - y)
         L_encrypted = LA_encrypted + encrypterB.encrypt_tensor(((uB - y)**2).sum()) + (((uA_encrypted * (uB - y).detach().cpu().numpy()).sum()) * 2)
+
+        L_encrypted = encrypterA.encode(L_encrypted)
+        d_encrypted = encrypterA.encode(d_encrypted)
+
         send(C, L_encrypted)
         send(A, d_encrypted)
 
-
         # Step 3
-        ### C
+        ### z
+        d_encrypted = encrypterA.decode(d_encrypted)
+        L_encrypted  = encrypterA.decode(L_encrypted)
+
         loss = encrypterC.decrypt_tensor(L_encrypted) / SIZE_BATCH
+        print("batch loss:", loss)
         losses_train.append(loss)
         # TODO check if may stop by losses
 
         gradient = encrypterC.decrypt_tensor(d_encrypted)
+        print(gradient)
         send(A, gradient)
         send(B, gradient)
 

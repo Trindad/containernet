@@ -34,7 +34,7 @@ class OneHot(object):
 
 
 
-def get_dataloader(side, seed=61):
+def get_dataloader(side, seed=61, batch_size=128):
     if side.upper() == "A":
         transform = transforms.Compose([
             Crop(0, 0, 28, 14),
@@ -65,7 +65,7 @@ def get_dataloader(side, seed=61):
 
     return DataLoader(
         data, 
-        batch_size=128,
+        batch_size=batch_size,
         shuffle=True, 
         drop_last=True,
         generator=torch.Generator().manual_seed(seed)

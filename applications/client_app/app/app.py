@@ -4,6 +4,7 @@ import time
 import socket
 import json
 import torch
+
 import sys
 import jsonpickle
 
@@ -65,9 +66,10 @@ async def fetchParams(websocket):
     ctxfile = open(TEMP_DIR_PATH + INDENTIFIER + ".con", "wb")
     with ctxfile:
         ctxfile.write(ctx)
-        
+
     global encryptor
     encryptor = HomomorphicEncryption(pubkeyfile.name, ctxfile.name)
+
 
 async def step_secondary(model, dataloader_iter, websocket):
     print("starting secondary step")
@@ -107,13 +109,17 @@ async def step_secondary(model, dataloader_iter, websocket):
 async def step_primary(model,  u_secondary, L_secondary, dataloader_iter, websocket):
     print("primary step")
     X, Y = next(dataloader_iter)
+
     u = model.forward(X)
 
     u_secondary = encryptor.decode(jsonpickle.decode(u_secondary))
     L_secondary = encryptor.decode(jsonpickle.decode(L_secondary))
 
     d_encrypted = u_secondary + encryptor.encrypt_tensor(u - Y)
-    L_encrypted = L_secondary + encryptor.encrypt_tensor(((u - Y)**2).sum()) + (((u_secondary * (u - Y).detach().cpu().numpy()).sum()) * 2)
+
+    # L_encrypted = LA_encrypted + encrypterB.encrypt_tensor(((uB - y)**2).sum()) + (((uA_encrypted * (uB - y).detach().cpu().numpy()).sum()) * 2)
+    L_encrypted = L_secondary + encryptor.encrypt_tensor(((u - Y)**2).sum()) + (
+        ((u_secondary * (u - Y).detach().cpu().numpy()).sum()) * 2)
 
     d_serialized = jsonpickle.encode(encryptor.encode(d_encrypted))
     L_serialized = jsonpickle.encode(encryptor.encode(L_encrypted))
@@ -132,6 +138,7 @@ async def step_primary(model,  u_secondary, L_secondary, dataloader_iter, websoc
 
 async def backprop(u, gradient, optimizer, websocket):
     gradient = jsonpickle.decode(gradient)
+    print(gradient)
 
     optimizer.zero_grad()
     # https://discuss.pytorch.org/t/what-does-tensor-backward-do-mathematically/27953
@@ -148,7 +155,7 @@ async def loop(websocket):
     await fetchParams(websocket)
 
     model = Model()
-    dataloader = get_dataloader(INDENTIFIER, SEED)
+    dataloader = get_dataloader(INDENTIFIER, SEED, BATCH_SIZE)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
     u = None
@@ -175,7 +182,7 @@ async def client():
     uri = "ws://"+websocket_ip+":8766"
 
     while True:
-        async with websockets.connect(uri, max_size=2 ** 40) as websocket:
+        async with websockets.connect(uri, max_size=2 ** 40, ping_interval=None, close_timeout=100000, ping_timeout=100000) as websocket:
             await loop(websocket)
 
 

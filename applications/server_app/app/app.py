@@ -112,7 +112,8 @@ async def calculate_step():
         gradient_encrypted = response['value']['d']
 
         L_encrypted = encrypter.decode(jsonpickle.decode(L_encrypted))
-        gradient_encrypted = encrypter.decode(jsonpickle.decode(gradient_encrypted))
+        gradient_encrypted = encrypter.decode(
+            jsonpickle.decode(gradient_encrypted))
 
         gradient = encrypter.decrypt_tensor(gradient_encrypted)
 
@@ -123,8 +124,8 @@ async def calculate_step():
         print("***********")
 
         request = {"op": op.BACKPROP, "value": jsonpickle.encode(gradient)}
-        await SECONDARY_CLIENT.send(json.dumps(request))
-        await PRIMARY_CLIENT.send(json.dumps(request))
+        request = json.dumps(request)
+        await asyncio.wait([SECONDARY_CLIENT.send(request), PRIMARY_CLIENT.send(request)], return_when=asyncio.ALL_COMPLETED)
 
         response = await RESPONSE.get()  # wait for both responses
         response = await RESPONSE.get()
@@ -163,7 +164,9 @@ async def controller():
 
 async def main():
     start_server = websockets.serve(
-        server, "0.0.0.0", 8766, ping_interval=None, max_size=2 ** 40)
+        server, "0.0.0.0", 8766,
+        ping_interval=None,
+        max_size=2 ** 40, close_timeout=100000, ping_timeout=100000)
 
     print("Starting Server")
     await asyncio.wait([start_server, controller()], return_when=asyncio.ALL_COMPLETED)
