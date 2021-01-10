@@ -1,6 +1,8 @@
 from os import error
 
+import numpy as np
 import torch
+from torch.utils.data import Subset
 import torchvision
 from torchvision import transforms
 from torch.utils.data import DataLoader
@@ -64,7 +66,7 @@ def get_dataloader(side, seed=61, batch_size=128):
     )
 
     return DataLoader(
-        data, 
+        data# Subset(data,np.arange(500)),
         batch_size=batch_size,
         shuffle=True, 
         drop_last=True,

@@ -150,14 +150,17 @@ async def controller():
             continue
 
         # EPOCH
-        print(f"EPOCH: {epoch} starting")
+        start_time = time.time()
+        print(f"EPOCH: {epoch} starting at {start_time}")
         await init_epoch()
         epoch_end = False
         while not epoch_end:
+            step_start_time = time.time()
             epoch_end = await calculate_step()
-            print("step done")
+            print(f"step done, took {time.time() - step_start_time}s")
         print(f"EPOCH: {epoch} done")
         print(f"EPOCH: loss {losses[-1]}")
+        print(f"EPOCH: {epoch} execution time {time.time() - start_time}s")
         print("*******************************")
         epoch += 1
 
