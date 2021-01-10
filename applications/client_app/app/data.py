@@ -66,7 +66,7 @@ def get_dataloader(side, seed=61, batch_size=128):
     )
 
     return DataLoader(
-        data# Subset(data,np.arange(500)),
+        data,# Subset(data,np.arange(500)),
         batch_size=batch_size,
         shuffle=True, 
         drop_last=True,
